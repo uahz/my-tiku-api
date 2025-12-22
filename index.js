@@ -1,11 +1,10 @@
-// index.js
 const express = require('express');
-const axios = require('axios'); // 用于调用 Qwen AI（稍后安装）
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// 允许跨域（OCS 从浏览器调用需要）
+// 允许跨域（可选，方便前端调用）
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -13,51 +12,54 @@ app.use((req, res, next) => {
   next();
 });
 
-// 静态题库（你可以后续扩展）
-const STATIC_QUESTIONS = {
-  "中国的首都是哪里？": { answer: "C", options: ["A. 上海", "B. 广州", "C. 北京", "D. 深圳"] },
-  "牛顿第一定律的内容是？": { answer: "B", options: ["A. F=ma", "B. 物体保持静止或匀速直线运动", "C. 作用力与反作用力", "D. 能量守恒"] }
-};
-
-// 模拟 Qwen AI 调用（先用 mock，后续替换为真实 API）
-async function callAI(question) {
-  // TODO: 后续替换为真实 Qwen 调用
-  return "AI暂未接入，请填入答案";
+// 读取题库文件（确保 tiku.txt 在项目根目录）
+let questionBank = [];
+try {
+  const data = fs.readFileSync(path.join(__dirname, 'tiku.txt'), 'utf8');
+  const lines = data.split('\n').filter(line => line.trim());
+  for (const line of lines) {
+    const [question, answer] = line.split('###').map(s => s.trim());
+    if (question && answer) {
+      questionBank.push({ question, answer });
+    }
+  }
+  console.log(`✅ 成功加载 ${questionBank.length} 条题库数据`);
+} catch (err) {
+  console.error('❌ 无法读取 tiku.txt:', err.message);
+  // 即使题库为空，服务也应启动（避免崩溃）
 }
 
-app.get('/query', async (req, res) => {
+// 核心查询接口
+app.get('/query', (req, res) => {
   const { title } = req.query;
-  
+
   if (!title) {
-    return res.json({ code: 1, msg: "缺少题目参数", data: {} });
+    return res.status(400).json({ error: '缺少 title 参数' });
   }
 
-  const normalized = title.trim();
-  
-  // 1. 查静态题库
-  if (STATIC_QUESTIONS[normalized]) {
-    const data = STATIC_QUESTIONS[normalized];
-    return res.json({
-      code: 0,
-      msg: "success",
-      data: { question: normalized, answer: data.answer, options: data.options }
-    });
-  }
+  // 模糊匹配：包含关键词即可（你可根据需要改为精确匹配）
+  const match = questionBank.find(item =>
+    item.question.includes(title) || title.includes(item.question)
+  );
 
-  // 2. 题库无结果 → 调 AI（目前 mock）
-  const aiAnswer = await callAI(normalized);
+  if (match) {
+    res.json({ answer: match.answer });
+  } else {
+    res.json({ answer: '未找到答案' });
+  }
+});
+
+// 健康检查（用于验证服务是否运行）
+app.get('/health', (req, res) => {
   res.json({
-    code: 0,
-    msg: "AI生成",
-    data: { question: normalized, answer: aiAnswer }
+    status: 'OK',
+    loadedQuestions: questionBank.length,
+    timestamp: new Date().toISOString()
   });
 });
 
-// 健康检查
-app.get('/', (req, res) => {
-  res.send('✅ 题库API运行中！支持OCS调用。');
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 服务启动在 http://localhost:${PORT}`);
+// 启动服务（关键！）
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 题库 API 已启动，监听端口 ${PORT}`);
 });
